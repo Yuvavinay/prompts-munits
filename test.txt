@@ -1,1 +1,148 @@
+You are an expert Mule 4 test engineer. I need you to generate a complete
+`.github/prompts/munit-generate.prompt.md` file — a self-contained instruction
+file that, when invoked as a Claude Code slash command (/munit-generate), will
+automatically produce correct MUnit 2.x test suites for a Mule 4 APIKit REST
+project.
 
+══════════════════════════════════
+WHAT THE PROMPT FILE MUST DO
+══════════════════════════════════
+
+When a developer runs `/munit-generate all` (or `/munit-generate <file.xml>`),
+the resulting agent must:
+
+1. Read the project source (src/main/mule/*.xml, pom.xml)
+2. Extract the RAML artifact from the local Maven .m2 cache
+3. Analyse every APIKit operation flow and all reachable sub-flows
+4. Write JSON test-data files to src/test/resources/in/ and .../out/
+5. Copy exactly two property files into src/test/resources/properties/
+6. Write MUnit XML suite files to src/test/munit/
+7. Self-validate every file it wrote before declaring done
+
+══════════════════════════════════
+HARD RULES — EVERY RULE IS MANDATORY
+══════════════════════════════════
+
+XML structure
+• File must begin with <?xml …?> — no BOM, no leading whitespace
+• Exactly ONE <?xml>, ONE <mule>, ONE </mule> per file
+• Every doc:id must be a valid UUID using ONLY hex digits 0-9 and a-f
+  (letters g-z are NOT hex — reject patterns like g7h8-i9j0)
+• Every doc:id in a file must be globally unique — no two elements share one
+• Add xmlns:http, xmlns:anypoint-mq, xmlns:db, xmlns:apikit etc. ONLY when
+  that namespace is actually used in the suite
+
+Test naming
+• SUITE_BASE = suite filename without .xml (always ends in -test-suite)
+• EVERY <munit:test name="…"> must start with <SUITE_BASE>-
+• NEVER use "happy-path", "error-path", or "default-choice" in any test name
+
+Structure inside each test (REST)
+• <munit:enable-flow-sources> is ALWAYS the first child of <munit:test>
+  — Mode A (HTTP tests):  enable MAIN_LISTENER_FLOW + PUBLIC_FLOW
+  — Mode B (APIKit errors): enable MAIN_LISTENER_FLOW only
+  — Mode C (error handler): enable MAIN_LISTENER_FLOW + PUBLIC_FLOW
+• <munit:set-event> is ALWAYS the first child of <munit:execution>
+  — set-event must contain ONLY <munit:payload>
+  — NEVER add <munit:variables> inside set-event (the flow sets its own vars)
+• Every test has EXACTLY FOUR INFO loggers with message="#[payload]":
+  execution-start and execution-end (in <munit:execution>)
+  validation-start and validation-end (in <munit:validation>)
+• Every test has EXACTLY ONE <munit-tools:assert> using:
+    <munit-tools:that><![CDATA[#[import * from dw::test::Asserts
+    ---
+    payload must notBeNull()]]]></munit-tools:that>
+  NEVER use assert-that, verify-call, or MunitTools::equalTo
+
+Mocking rules
+• Mock connectors by doc:id only — read the doc:id verbatim from source XML
+• NEVER add a doc:name with-attribute alongside the doc:id match
+• Mock payload from file: readUrl('classpath://out/<file>.json', 'application/json')
+• NEVER embed inline JSON directly in a mock value attribute without readUrl
+• child order inside <munit-tools:then-return>: variables → payload → attributes → error
+• <munit:behavior> is NEVER empty; if a branch genuinely has no connectors,
+  add <!-- B16-exception: provably empty branch --> inside it
+• NEVER mock json-logger:logger (it does no external I/O)
+• NEVER use verify-call
+• Put mock-when ONLY in <munit:behavior> — never in execution or validation
+• NEVER use <flow-ref> inside <munit:execution> for REST tests (use <http:request>)
+  Exception: raise-error tests that invoke the sub-flow directly
+
+Coverage requirements
+• Enumerate every execution path depth-first before writing any XML
+• <choice>: one test per <when> branch AND one test for <otherwise> — always both
+• <scatter-gather>: one all-branches-happy test + one per-branch-alternative per
+  non-trivial branch
+• <foreach>/<batch:step>: one iteration-representative test
+• <try>: one success path + one error path per <on-error-*> handler
+• Cache (os:retrieve gating a branch): BOTH miss and hit tests — never collapse
+• <until-successful>: one success + one MULE:RETRY_EXHAUSTED path
+• Every element with a doc:id must appear in at least one test's execution path
+• Flows with ≤25 doc:id elements: target 100% coverage
+• Larger flows: minimum 80% processor coverage
+
+Sub-flow drill-through
+• For every <flow-ref> (especially inside <choice> branches):
+  SEARCH → READ → list every processor → record backend connectors with doc:id
+• Backend connectors to mock: http:request, db:*, salesforce:*, wsc:consume,
+  sftp:*, ftp:*, file:*, os:store/retrieve/contains/remove, anypoint-mq:*,
+  jms:*, vm:*
+• If a sub-flow resolves → replace flow-ref mock with real backend connector mocks
+• If a sub-flow cannot be found → keep flow-ref mock and add NOTE comment
+
+Properties
+• Copy ONLY these two files (src/main → src/test):
+  app-properties-test.yaml  and  app-secrets-test.yaml
+• NEVER copy or create: *-dev/qa/prod.yaml, app-constants.yaml,
+  app-errors.yaml, apikit-errors.yaml — not even if they exist in src/main
+
+Error tests
+• Add as last child of <http:request>:
+  <http:response-validator>
+    <http:success-status-code-validator values="200..599" />
+  </http:response-validator>
+
+Input JSON (in/ files)
+• Base input: write RAML requestExample verbatim — do not invent fields
+• Branch copies: change ONLY the fields the <when> expression tests,
+  satisfying ALL conditions (compound conditions require ALL fields changed)
+• Validate every in/ file: correct enum values from RAML, correct JSON types,
+  all required fields present — these are HARD GATES before WRITE
+
+Output JSON (out/ files)
+• out/ = raw backend connector output (what the DWL reads as payload input)
+• NOT the DWL transform output, NOT the RAML response example
+• Exception: pass-through DWL (body is exactly `payload`) → use RAML example
+
+RAML extraction
+• Windows: New-Item -ItemType Directory -Force -Path "$env:TEMP\munit-raml\<id>"
+  then:  tar -xf "<zip>" -C "$env:TEMP\munit-raml\<id>"
+• Mac/Linux: unzip -o "<zip>" -d "/tmp/munit-raml/<id>"
+• If RAML artifact is not found in .m2: HALT the entire run — write nothing
+
+Self-validation (run after every WRITE, fix before declaring done)
+• Re-read each written file and verify:
+  — All hard rules above are satisfied
+  — Every enable-flow-source value traces to a flow name read from api.xml
+  — Every whereValue doc:id traces to a doc:id read from source this run
+  — No guessed, recalled, or fabricated values anywhere
+  — src/test/resources/properties contains ONLY the two test yaml files
+  — No model names, vendor names, or token limits appear in any output file
+
+══════════════════════════════════
+OUTPUT FORMAT FOR THE .github/prompts FILE
+══════════════════════════════════
+
+• frontmatter: mode: 'agent', name: 'munit-generate', version, description,
+  argument-hint: '<file.xml> | all | errors'
+• Invocation section explaining /munit-generate <file.xml> | all | errors
+• All rules above embedded as scan-before-WRITE bans with auto-fix instructions
+• Step-by-step process: Pre-flight → RAML extract → Analyse flows →
+  Drill sub-flows → Plan coverage → Write JSON → Write properties →
+  Write XML → Self-validate
+• Canonical XML blocks for: suite root, test structure (REST Mode A/B/C),
+  connector mock, APIKit router mock, error test additions, OS connector mocks
+• Progress update format: → <plain action line> before each step,
+  ✅ Done: <filename> (<N> tests) after each suite,
+  final Summary line
+• The file must be self-contained — no imports, no shared files referenced
