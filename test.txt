@@ -1,1 +1,31 @@
+Next: reporting discovery and HTTP planning; RAML missing blocks generation.
 
+Module: digh-enrollment-papi-v3 — see pom.xml
+
+Discovered HTTP listener / router: api-flow (APIKit router present) — api.xml
+
+Discovered non-HTTP/public flows (callable):
+
+create-enrollment-flow — create-enrollment.xml
+create-enrollment-v2-flow — create-enrollment-v2.xml
+create-eligibility-flow — create-eligibility.xml
+HTTP worker run (plan summary):
+
+RAML coordinates from POM: groupId=58484177-6b93-4b16-bbeb-b12b8a5873da, artifactId=csp-dhisp-enrollment-services-api, version=3.0.43, classifier=raml, type=zip
+Local RAML archive found at: csp-dhisp-enrollment-services-api-3.0.43-raml.zip
+Extracted API roots discovered: POST /enrollment, POST /v2/enrollment, POST /eligibility
+Blocker (fatal for header resolution): the RAML references an external library common (exchange_modules/.../csp-dhisp-common-api-library/1.0.4/...), which is missing from the extracted archive. Because traits from that library apply required request headers, I cannot resolve the effective request headers or finalize per-operation header maps.
+Pending required endpoint suites (detected): post-enrollment-test-suite.xml, post-v2-enrollment-test-suite.xml, post-eligibility-test-suite.xml
+External-call mocks discovered (processor doc:id examples): anypoint-mq publish, multiple http:request calls (SendGrid, MMS, Bitly, Contentful, LSC, Nintex, Pureway). These must be mocked by exact processor selectors/doc:id when generating suites.
+Status (todo):
+
+Discover entry sources — completed
+Run HTTP worker and plan APIKit endpoints — completed (partial plan)
+Resolve missing RAML library — in progress (BLOCKER)
+Run Non-HTTP worker and plan non-HTTP suites — not started (blocked until RAML resolution for full invocation)
+Options to proceed (pick one):
+
+Add the missing RAML fragment/library (csp-dhisp-common-api-library raml v1.0.4) to the local Maven repository (same coordinates/classifier) or include that fragment in the RAML artifact, then I will re-run the HTTP worker and finish the full plan and test-file generation.
+Provide the missing trait/library RAML file here (upload or paste); I will resume and produce full plan.json, Definition/Branch/Scenario tables, and required mock bindings.
+If you prefer to continue only with non-HTTP planning (no RAML), tell me and I will run the non-HTTP worker now — note: the router rules treat missing HTTP RAML as blocking writes for mixed scope, but I can still produce a non-HTTP plan (it will be incomplete relative to combined generation).
+Would you like me to (A) show the exact processor doc:id → doc:name → source-file mapping I discovered (useful for writing mocks), (B) run the non-HTTP worker now, or (C) proceed after you add/provide the missing RAML?
